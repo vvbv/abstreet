@@ -10,8 +10,11 @@ use abstutil;
 use abstutil::{deserialize_btreemap, serialize_btreemap, Error, Timer};
 use geom::{Bounds, GPSBounds, Polygon};
 use serde_derive::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::io;
+use std::path;
+use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Map {
@@ -43,6 +46,7 @@ pub struct Map {
     turn_lookup: Vec<TurnID>,
     // TODO Argh, hack, initialization order is hard!
     pathfinder: Option<Pathfinder>,
+    num_slow_pathfinds: Mutex<RefCell<usize>>,
 
     name: String,
     edits: MapEdits,
@@ -85,6 +89,7 @@ impl Map {
             bounds,
             turn_lookup: half_map.turn_lookup,
             pathfinder: None,
+            num_slow_pathfinds: Mutex::new(RefCell::new(0)),
             name: name.clone(),
             edits: MapEdits::new(name),
         };
@@ -536,6 +541,14 @@ impl Map {
 
     pub fn pathfind(&self, req: PathRequest) -> Option<Path> {
         self.pathfinder.as_ref().unwrap().pathfind(req, self)
+    }
+
+    pub fn pathfind_slow(&self, req: PathRequest) -> Option<Path> {
+        let cnt_refcell = self.num_slow_pathfinds.lock().unwrap();
+        let mut cnt = cnt_refcell.borrow_mut();
+        *cnt += 1;
+        println!("{} slow A* fallbacks", abstutil::prettyprint_usize(*cnt));
+        crate::pathfind::slow::shortest_distance(self, req)
     }
 
     pub fn should_use_transit(

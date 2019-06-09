@@ -123,10 +123,10 @@ impl VehiclePathfinder {
 
     pub fn apply_edits(
         &mut self,
-        delete_turns: &BTreeSet<TurnID>,
-        add_turns: &BTreeSet<TurnID>,
-        map: &Map,
-        timer: &mut Timer,
+        _delete_turns: &BTreeSet<TurnID>,
+        _add_turns: &BTreeSet<TurnID>,
+        _map: &Map,
+        _timer: &mut Timer,
     ) {
         // TODO Recalculate from scratch or something else
     }
