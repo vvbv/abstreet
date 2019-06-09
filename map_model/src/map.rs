@@ -124,6 +124,9 @@ impl Map {
 
             m.bus_routes = make::verify_bus_routes(&m, routes, timer);
         }
+        timer.start("setup pathfinder");
+        m.pathfinder = Some(Pathfinder::new(&m, timer));
+        timer.stop("setup pathfinder");
 
         timer.stop("finalize Map");
         m
@@ -704,7 +707,9 @@ impl Map {
         }
 
         let mut pathfinder = self.pathfinder.take().unwrap();
-        pathfinder.apply_edits(&delete_turns, &add_turns, self);
+        timer.start("apply_edits to Pathfinder");
+        pathfinder.apply_edits(&delete_turns, &add_turns, self, timer);
+        timer.stop("apply_edits to Pathfinder");
         self.pathfinder = Some(pathfinder);
 
         self.edits = new_edits;

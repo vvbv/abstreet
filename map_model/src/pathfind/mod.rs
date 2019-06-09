@@ -5,6 +5,7 @@ mod walking;
 use self::driving::{Outcome, VehiclePathfinder};
 use self::walking::SidewalkPathfinder;
 use crate::{BusRouteID, BusStopID, LaneID, LaneType, Map, Position, Traversable, TurnID};
+use abstutil::Timer;
 use geom::{Distance, PolyLine};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::{BTreeSet, VecDeque};
@@ -323,13 +324,17 @@ pub struct Pathfinder {
 }
 
 impl Pathfinder {
-    pub fn new(map: &Map) -> Pathfinder {
+    pub fn new(map: &Map, timer: &mut Timer) -> Pathfinder {
         Pathfinder {
-            car_graph: VehiclePathfinder::new(map, vec![LaneType::Driving]),
-            bike_graph: VehiclePathfinder::new(map, vec![LaneType::Driving, LaneType::Biking]),
-            bus_graph: VehiclePathfinder::new(map, vec![LaneType::Driving, LaneType::Bus]),
-            walking_graph: SidewalkPathfinder::new(map, false),
-            walking_with_transit_graph: SidewalkPathfinder::new(map, true),
+            car_graph: VehiclePathfinder::new(map, vec![LaneType::Driving], timer),
+            bike_graph: VehiclePathfinder::new(
+                map,
+                vec![LaneType::Driving, LaneType::Biking],
+                timer,
+            ),
+            bus_graph: VehiclePathfinder::new(map, vec![LaneType::Driving, LaneType::Bus], timer),
+            walking_graph: SidewalkPathfinder::new(map, false, timer),
+            walking_with_transit_graph: SidewalkPathfinder::new(map, true, timer),
         }
     }
 
@@ -378,9 +383,13 @@ impl Pathfinder {
         delete_turns: &BTreeSet<TurnID>,
         add_turns: &BTreeSet<TurnID>,
         map: &Map,
+        timer: &mut Timer,
     ) {
-        self.car_graph.apply_edits(delete_turns, add_turns, map);
-        self.bike_graph.apply_edits(delete_turns, add_turns, map);
-        self.bus_graph.apply_edits(delete_turns, add_turns, map);
+        self.car_graph
+            .apply_edits(delete_turns, add_turns, map, timer);
+        self.bike_graph
+            .apply_edits(delete_turns, add_turns, map, timer);
+        self.bus_graph
+            .apply_edits(delete_turns, add_turns, map, timer);
     }
 }

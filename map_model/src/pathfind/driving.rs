@@ -1,21 +1,17 @@
-use crate::{DirectedRoadID, LaneID, LaneType, Map, Path, PathRequest, PathStep, Turn, TurnID};
-use abstutil::{deserialize_btreemap, serialize_btreemap};
-use geom::Distance;
-use petgraph::graph::NodeIndex;
-use petgraph::stable_graph::StableGraph;
+use crate::{DirectedRoadID, LaneType, Map, Path, PathRequest, PathStep, RoadID, TurnID};
+use abstutil::Timer;
+use derivative::Derivative;
+use rust_ch::{ContractionHierarchy, InputGraph};
 use serde_derive::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 
 // TODO Make the graph smaller by considering RoadID, or even (directed?) bundles of roads based on
 // OSM way.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Derivative)]
+#[derivative(Debug)]
 pub struct VehiclePathfinder {
-    graph: StableGraph<DirectedRoadID, Distance>,
-    #[serde(
-        serialize_with = "serialize_btreemap",
-        deserialize_with = "deserialize_btreemap"
-    )]
-    nodes: BTreeMap<DirectedRoadID, NodeIndex<u32>>,
+    #[derivative(Debug = "ignore")]
+    ch: ContractionHierarchy,
     lane_types: Vec<LaneType>,
 }
 
@@ -26,97 +22,66 @@ pub enum Outcome {
 }
 
 impl VehiclePathfinder {
-    pub fn new(map: &Map, lane_types: Vec<LaneType>) -> VehiclePathfinder {
-        let mut g = VehiclePathfinder {
-            graph: StableGraph::new(),
-            nodes: BTreeMap::new(),
-            lane_types,
-        };
+    pub fn new(map: &Map, lane_types: Vec<LaneType>, timer: &mut Timer) -> VehiclePathfinder {
+        let mut g = InputGraph::new();
 
-        for r in map.all_roads() {
-            // Could omit if there aren't any matching lane types, but since those can be edited,
-            // it's actually a bit simpler to just have all nodes.
-            if !r.children_forwards.is_empty() {
-                let id = r.id.forwards();
-                g.nodes.insert(id, g.graph.add_node(id));
-            }
-            if !r.children_backwards.is_empty() {
-                let id = r.id.backwards();
-                g.nodes.insert(id, g.graph.add_node(id));
-            }
-        }
-
+        timer.start("building InputGraph");
+        let mut existing_edges = HashSet::new();
         for t in map.all_turns().values() {
-            g.add_turn(t, map);
-        }
-
-        /*println!(
-            "{} nodes, {} edges",
-            g.graph.node_count(),
-            g.graph.edge_count()
-        );*/
-
-        g
-    }
-
-    fn add_turn(&mut self, t: &Turn, map: &Map) {
-        if !map.is_turn_allowed(t.id) {
-            return;
-        }
-        let src_l = map.get_l(t.id.src);
-        let dst_l = map.get_l(t.id.dst);
-        if self.lane_types.contains(&src_l.lane_type) && self.lane_types.contains(&dst_l.lane_type)
-        {
-            let src = self.get_node(t.id.src, map);
-            let dst = self.get_node(t.id.dst, map);
-            // First length arbitrarily wins.
-            if self.graph.find_edge(src, dst).is_none() {
-                self.graph
-                    .add_edge(src, dst, src_l.length() + t.geom.length());
+            if !map.is_turn_allowed(t.id) {
+                continue;
             }
-        }
-    }
+            let src_l = map.get_l(t.id.src);
+            let dst_l = map.get_l(t.id.dst);
+            if !lane_types.contains(&src_l.lane_type) || !lane_types.contains(&dst_l.lane_type) {
+                continue;
+            }
+            // First length arbitrarily wins.
+            let edge = (
+                src_l.get_directed_parent(map),
+                dst_l.get_directed_parent(map),
+            );
+            if existing_edges.contains(&edge) {
+                continue;
+            }
+            // TODO Speed limit or some other cost
+            let length = src_l.length() + t.geom.length();
+            let length_cm = (length.inner_meters() * 100.0).round() as usize;
 
-    fn get_node(&self, lane: LaneID, map: &Map) -> NodeIndex<u32> {
-        self.nodes[&map.get_l(lane).get_directed_parent(map)]
+            g.add_edge(node_idx(edge.0), node_idx(edge.1), length_cm);
+            existing_edges.insert(edge);
+        }
+        timer.stop("building InputGraph");
+
+        timer.start("prepare CH");
+        let mut ch = ContractionHierarchy::new(g.get_num_nodes());
+        ch.prepare(&g);
+        timer.stop("prepare CH");
+
+        VehiclePathfinder { ch, lane_types }
     }
 
     pub fn pathfind(&self, req: &PathRequest, map: &Map) -> Outcome {
         assert!(!map.get_l(req.start.lane()).is_sidewalk());
 
-        let start_node = self.get_node(req.start.lane(), map);
-        let end_node = self.get_node(req.end.lane(), map);
-        let end_pt = map.get_l(req.end.lane()).first_pt();
-
-        let raw_nodes = match petgraph::algo::astar(
-            &self.graph,
-            start_node,
-            |n| n == end_node,
-            |e| *e.weight(),
-            |n| {
-                let dr = self.graph[n];
-                let r = map.get_r(dr.id);
-                if dr.forwards {
-                    end_pt.dist_to(r.center_pts.last_pt())
-                } else {
-                    end_pt.dist_to(r.center_pts.first_pt())
-                }
-            },
-        ) {
-            Some((_, nodes)) => nodes,
-            None => {
-                return Outcome::Failure;
-            }
-        };
+        let path = self.ch.calc_path(
+            node_idx(map.get_l(req.start.lane()).get_directed_parent(map)),
+            node_idx(map.get_l(req.end.lane()).get_directed_parent(map)),
+        );
+        if path.get_nodes().is_empty() {
+            return Outcome::Failure;
+        }
 
         // TODO windows(2) would be fine for peeking, except it drops the last element for odd
         // cardinality
-        let mut nodes = VecDeque::from(raw_nodes);
+        let mut nodes = VecDeque::new();
+        for node in path.get_nodes() {
+            nodes.push_back(idx_to_node(*node));
+        }
 
         let mut steps: Vec<PathStep> = Vec::new();
         while !nodes.is_empty() {
-            let n = nodes.pop_front().unwrap();
-            let dr = self.graph[n];
+            let dr = nodes.pop_front().unwrap();
             if steps.is_empty() {
                 steps.push(PathStep::Lane(req.start.lane()));
             } else {
@@ -132,10 +97,9 @@ impl VehiclePathfinder {
                         let l = map.get_l(t.id.dst);
                         if l.get_directed_parent(map) == dr {
                             // TODO different case when nodes.len() == 1.
-                            map.get_turns_from_lane(l.id).into_iter().any(|t2| {
-                                map.get_l(t2.id.dst).get_directed_parent(map)
-                                    == self.graph[nodes[0]]
-                            })
+                            map.get_turns_from_lane(l.id)
+                                .into_iter()
+                                .any(|t2| map.get_l(t2.id.dst).get_directed_parent(map) == nodes[0])
                         } else {
                             false
                         }
@@ -162,20 +126,26 @@ impl VehiclePathfinder {
         delete_turns: &BTreeSet<TurnID>,
         add_turns: &BTreeSet<TurnID>,
         map: &Map,
+        timer: &mut Timer,
     ) {
-        // Most turns will be in both lists. That's fine -- we want to re-add the same turn and
-        // check if the lane type is different.
-        for t in delete_turns {
-            if let Some(e) = self
-                .graph
-                .find_edge(self.get_node(t.src, map), self.get_node(t.dst, map))
-            {
-                self.graph.remove_edge(e);
-            }
-        }
+        // TODO Recalculate from scratch or something else
+    }
+}
 
-        for t in add_turns {
-            self.add_turn(map.get_t(*t), map);
-        }
+fn node_idx(id: DirectedRoadID) -> usize {
+    let i = 2 * id.id.0;
+    if id.forwards {
+        i
+    } else {
+        i + 1
+    }
+}
+
+fn idx_to_node(idx: usize) -> DirectedRoadID {
+    let id = RoadID(idx / 2);
+    if idx % 2 == 0 {
+        id.forwards()
+    } else {
+        id.backwards()
     }
 }

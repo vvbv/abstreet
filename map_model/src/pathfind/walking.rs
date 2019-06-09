@@ -2,7 +2,7 @@ use crate::{
     BusRouteID, BusStopID, DirectedRoadID, IntersectionID, LaneID, LaneType, Map, Path,
     PathRequest, PathStep, Position,
 };
-use abstutil::{deserialize_btreemap, serialize_btreemap};
+use abstutil::{deserialize_btreemap, serialize_btreemap, Timer};
 use geom::Distance;
 use petgraph::graph::{Graph, NodeIndex};
 use serde_derive::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ enum Edge {
 }
 
 impl SidewalkPathfinder {
-    pub fn new(map: &Map, use_transit: bool) -> SidewalkPathfinder {
+    pub fn new(map: &Map, use_transit: bool, timer: &mut Timer) -> SidewalkPathfinder {
         let mut g = SidewalkPathfinder {
             graph: Graph::new(),
             nodes: BTreeMap::new(),
