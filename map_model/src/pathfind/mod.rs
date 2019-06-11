@@ -1,5 +1,5 @@
 mod driving;
-mod slow;
+pub mod slow;
 mod walking;
 
 use self::driving::{Outcome, VehiclePathfinder};
@@ -364,7 +364,7 @@ impl Pathfinder {
         match outcome {
             Outcome::Success(path) => Some(path),
             Outcome::Failure => None,
-            Outcome::RetrySlow => self::slow::shortest_distance(map, req),
+            Outcome::RetrySlow => map.pathfind_slow(req),
         }
     }
 

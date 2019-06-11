@@ -4,7 +4,7 @@ use crate::{
 };
 use abstutil::Timer;
 use derivative::Derivative;
-use rust_ch::{ContractionHierarchy, InputGraph};
+use fast_paths::{ContractionHierarchy, InputGraph};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashSet;
 

@@ -1,7 +1,7 @@
 use crate::{DirectedRoadID, LaneType, Map, Path, PathRequest, PathStep, RoadID, TurnID};
 use abstutil::Timer;
 use derivative::Derivative;
-use rust_ch::{ContractionHierarchy, InputGraph};
+use fast_paths::{ContractionHierarchy, InputGraph};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashSet, VecDeque};
 
@@ -51,6 +51,7 @@ impl VehiclePathfinder {
             g.add_edge(node_idx(edge.0), node_idx(edge.1), length_cm);
             existing_edges.insert(edge);
         }
+        g.save("input_graph").unwrap();
         timer.stop("building InputGraph");
 
         timer.start("prepare CH");

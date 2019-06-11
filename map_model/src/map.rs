@@ -13,7 +13,6 @@ use serde_derive::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::io;
-use std::path;
 use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -115,7 +114,7 @@ impl Map {
         }
 
         timer.start("setup Pathfinder");
-        m.pathfinder = Some(Pathfinder::new(&m));
+        m.pathfinder = Some(Pathfinder::new(&m, timer));
         timer.stop("setup Pathfinder");
 
         {
